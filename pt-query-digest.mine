@@ -13132,39 +13132,44 @@ my $exit_status = 0;
 (my $tool = __PACKAGE__) =~ tr/_/-/;
 
 sub my_alternative {
-    my ( $str1 , $str2) = @_;
+    my ( $str1 , $event) = @_;
+    my $str2=$event->{arg};
     my $diff=0;
     my $c=0;
     my $position=0;
     my $lenposition = length($str1);
+    my $eventId=0;
 
-   $str2 =~ s/\A\s+//;                  # Chop off leading whitespace
-   chomp $str2;                         # Kill trailing whitespace
-   $str2 =~ tr[ \n\t\r\f][ ]s;          # Collapse whitespace
-   $str2 = lc $str2;
+    return 0 if ! rindex($str1,"administrator command:",0);
+
+    $eventId= $event->{Id} if exists $event->{Id};
+    $eventId= $event->{Thread_id} if exists $event->{Thread_id};
+
+    $str2 =~ s/\A\s+//;                  # Chop off leading whitespace
+    chomp $str2;                         # Kill trailing whitespace
+    $str2 =~ tr[ \n\t\r\f][ ]s;          # Collapse whitespace
+    $str2 = lc $str2;
 
     my @str1chars = split("", $str1);
     if (!@str1chars){
        return;
     }
-#    print "$str1\n$str2\n";
 
     my @str2chars = split("", $str2);
     my $len = length($str2);
-#    print "$str1 $str2 $position $len $lenposition $str1chars[$position] eq $str2chars[$i]\n";
 
     my $checksum=make_checksum($str1);
     my $dir = "data/";
 
-    open(my $fhdata, '>>', $dir . $checksum . "_data");
+    open(my $fhdata, '>>', $dir . $eventId . "_data");
+    print $fhdata "\t{\"$checksum\" , \"";
 
     while ( $position < $lenposition ){
        while ( $position < $lenposition and defined($str2chars[$position + $diff]) and  $str1chars[$position] eq $str2chars[$position + $diff] ){
-#         print "$str1chars[$position]";
          $position=$position+1;
        }
        if ($position < $lenposition && !defined($str2chars[$position + $diff])){
-         print "Error: $str1\n$str2\n$position -- $diff\n";
+	       #	 print "Error: $str1\n$str2\n$position -- $diff\n";
          return;
        }
        if ($position < $lenposition){
@@ -13173,11 +13178,15 @@ sub my_alternative {
              $position=$position+1;
              $diff=$diff-1;
           }
-          print $fhdata "$str2chars[$position+$diff]";
+	  my $tmpstr=$str2chars[$position+$diff] ;
+	  $tmpstr =~ s/"/\\"/g;
+	  print $fhdata "$tmpstr";
           $position=$position+1;
           while ($position < $lenposition && $str1chars[$position] ne $str2chars[$position + $diff]){
-             print $fhdata "$str2chars[$position+$diff]";
-             $diff=$diff+1;
+	     my $tmpstr=$str2chars[$position+$diff] ;
+	     $tmpstr =~ s/"/\\"/g; 
+	     print $fhdata "$tmpstr";
+	     $diff=$diff+1;
           }
           if ($position < $lenposition){
              print $fhdata "\t";
@@ -13185,13 +13194,15 @@ sub my_alternative {
        }else{ $diff=$diff+1;
        }
        }else{ #$position=$position+1;
-}
+       }
     }
     while ( $position+$diff < $len ){
-      print $fhdata "$str2chars[$position+$diff]";
+      my $tmpstr = $str2chars[$position+$diff];
+      $tmpstr =~ s/"/\\"/g;
+      print $fhdata "$tmpstr";
       $diff=$diff+1;
     }
-    print $fhdata "\n";
+    print $fhdata "\"},\n";
     close $fhdata;
 
     if (! -f $dir . $checksum . "_query" ){
@@ -13997,7 +14008,8 @@ sub main {
 
 	    my $fingerprint=$qr->fingerprint($args->{event}->{arg});
 	    if (defined $fingerprint){
-		    my_alternative($fingerprint, $args->{event}->{arg}); #DAVID
+		    #		    print ($args->{event}->{Id}) if exists $args->{event}->{Id};
+		    my_alternative($fingerprint, $args->{event}); #DAVID
 	    }
             if ( $report ) {
                PTDEBUG && _d("Iteration", $args->{iter}, "stopped at",ts(time));
