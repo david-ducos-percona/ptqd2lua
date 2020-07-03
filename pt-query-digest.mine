@@ -13169,7 +13169,7 @@ sub my_alternative {
          $position=$position+1;
        }
        if ($position < $lenposition && !defined($str2chars[$position + $diff])){
-	       #	 print "Error: $str1\n$str2\n$position -- $diff\n";
+	       	 print "Error: $str1\n$str2\n$position -- $diff\n";
          return;
        }
        if ($position < $lenposition){

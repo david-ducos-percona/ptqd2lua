@@ -12,7 +12,6 @@ function thread_init()
   for i=0, sysbench.opt.threads do
 	a[i]={}
   end
-
   for k,query in pairs(sessions) do
 	  table.insert(a[k % sysbench.opt.threads],k)
   end
@@ -33,14 +32,22 @@ function split(s, delimiter)
 end
 
 function search_next_session(thread_number)
-	return table.remove(a[thread_number])
+	if not(#a[thread_number] == 0)
+	then
+		return table.remove(a[thread_number])
+	end
+	return 0;
 end
 
 function execute_session(sid)
-	for k,query in pairs(sessions[sid]) do
-		con:query(string.format(md5queries["a"..query[1]],unpack(split(query[2],'\t'))))
+	if not(sid == 0)
+	then
+		for k,query in pairs(sessions[sid]) do
+			con:query(string.format(md5queries["a"..query[1]],unpack(split(query[2],'\t'))))
+		end
 	end
 end
+
 
 -- Called by sysbench for each execution
 function event()
