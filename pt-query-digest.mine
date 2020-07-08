@@ -13163,37 +13163,56 @@ sub my_alternative {
 
     open(my $fhdata, '>>', $dir . $eventId . "_data");
     print $fhdata "\t{\"$checksum\" , \"";
-
+    my $goforward=0;
+    my $state=0;
+    my $first=1;
     while ( $position < $lenposition ){
-       while ( $position < $lenposition and defined($str2chars[$position + $diff]) and  $str1chars[$position] eq $str2chars[$position + $diff] ){
-         $position=$position+1;
+       while ( $position + $goforward < $lenposition and defined($str2chars[$position + $goforward + $diff]) and  $str1chars[$position + $goforward] eq $str2chars[$position + $goforward + $diff] ){
+         $goforward=$goforward+1;
        }
-       if ($position < $lenposition && !defined($str2chars[$position + $diff])){
-	       	 print "Error: $str1\n$str2\n$position -- $diff\n";
-         return;
-       }
-       if ($position < $lenposition){
-       if ($str1chars[$position] eq '?') {
-          if ($position +1 < $lenposition && $str1chars[$position+1] eq '+') {
-             $position=$position+1;
-             $diff=$diff-1;
-          }
-	  my $tmpstr=$str2chars[$position+$diff] ;
-	  $tmpstr =~ s/"/\\"/g;
-	  print $fhdata "$tmpstr";
-          $position=$position+1;
-          while ($position < $lenposition && $str1chars[$position] ne $str2chars[$position + $diff]){
-	     my $tmpstr=$str2chars[$position+$diff] ;
-	     $tmpstr =~ s/"/\\"/g; 
-	     print $fhdata "$tmpstr";
-	     $diff=$diff+1;
-          }
-          if ($position < $lenposition){
-             print $fhdata "\t";
-          }
-       }else{ $diff=$diff+1;
-       }
-       }else{ #$position=$position+1;
+       #       print "$str1chars[$position + $goforward] eq $str2chars[$position + $goforward + $diff] : not equal";
+       if ($position + $goforward < $lenposition){
+	       if ($str1chars[$position + $goforward] eq '?') {
+		       $state=1;
+		       $position=$position+$goforward;
+		       $goforward=0;
+		       if ($position +1 < $lenposition && $str1chars[$position+1] eq '+') {
+			       $position=$position+1;
+			       $diff=$diff-1;
+		       }
+		       if ($first == 1){
+			       $first=0;
+		       }else{
+			       if ($position < $lenposition ){
+				       print $fhdata "\t";
+			       }
+       		       }
+                       if ( defined($str2chars[$position+$diff])){
+			       my $tmpstr=$str2chars[$position+$diff] ;
+			       $tmpstr =~ s/"/\\"/g;
+			       print $fhdata "$tmpstr";
+		       }
+		       $position=$position+1;
+	       }else{ # We need to print the buffer if it is not larger than 5, because why so many equal characters?
+		       if ($goforward < 3) {
+			       for(my $i = 0; $i <= $goforward; $i++){
+				       if ( defined($str2chars[$position+$diff])){
+					       my $tmpstr=$str2chars[$position+$diff] ;
+					       $tmpstr =~ s/"/\\"/g;
+			       #			       print  "printing: $tmpstr \n";
+						if ($state == 1){
+			       				print $fhdata "$tmpstr";
+						}
+	 					$diff=$diff+1;
+	 				}else {$position=$position+1;}
+	 			}
+	 		}else{  $state=0;
+				$position=$position+$goforward;
+			}
+ 			$goforward=0;
+	       }
+       }else{
+	       $position=$position+$goforward;
        }
     }
     while ( $position+$diff < $len ){
