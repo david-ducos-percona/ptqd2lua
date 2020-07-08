@@ -8,12 +8,18 @@ function thread_init()
   drv = sysbench.sql.driver()
   -- con - represents the connection to MySQL
   con = drv:connect()
-  a={}
+  sessions_per_thread={}
+  current_sid={}
+  current_pos={}
   for i=0, sysbench.opt.threads do
-	a[i]={}
+        sessions_per_thread[i]={}
+        current_pos[i]=1
   end
   for k,query in pairs(sessions) do
-	  table.insert(a[k % sysbench.opt.threads],k)
+	  table.insert(sessions_per_thread[k % sysbench.opt.threads],k)
+  end
+  for i=0, sysbench.opt.threads do
+        current_sid[i]=table.remove(sessions_per_thread[i]);
   end
 end
 
@@ -32,24 +38,38 @@ function split(s, delimiter)
 end
 
 function search_next_session(thread_number)
-	if not(#a[thread_number] == 0)
+	if not(#sessions_per_thread[thread_number] == 0)
 	then
-		return table.remove(a[thread_number])
+		return table.remove(sessions_per_thread[thread_number])
 	end
 	return 0;
+end
+
+function next_pos(thread_number)
+	if not(current_sid[thread_number] == 0 )
+	then
+		if (#sessions[current_sid[thread_number]] > current_pos[thread_number])
+	        then
+			current_pos[thread_number]=current_pos[thread_number]+1
+		else
+			current_sid[thread_number]=search_next_session(thread_number)
+			current_pos[thread_number]=1
+--			print ("starting new session id:",current_sid[thread_number])
+	        end
+	end
+        return 0;
 end
 
 function execute_session(sid)
 	if not(sid == 0)
 	then
-		for k,query in pairs(sessions[sid]) do
-			con:query(string.format(md5queries["a"..query[1]],unpack(split(query[2],'\t'))))
-		end
+		query=sessions[sid][current_pos[sysbench.tid]]
+		con:query(string.format(md5queries["a"..query[1]],unpack(split(query[2],'\t'))))
 	end
+	next_pos(sysbench.tid)
 end
-
 
 -- Called by sysbench for each execution
 function event()
-	execute_session(search_next_session(sysbench.tid))
+	execute_session(current_sid[sysbench.tid])
 end
