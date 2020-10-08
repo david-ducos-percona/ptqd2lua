@@ -64,7 +64,7 @@ BEGIN {
 {
 package Percona::Toolkit;
 
-our $VERSION = '3.0.13';
+our $VERSION = '3.2.0';
 
 use strict;
 use warnings FATAL => 'all';
@@ -855,7 +855,7 @@ sub parse {
    foreach my $key ( keys %$opts ) {
       PTDEBUG && _d('Finding value for', $key);
       $final_props{$key} = $given_props{$key};
-      if (   !defined $final_props{$key}
+      if ( !defined $final_props{$key}
            && defined $prev->{$key} && $opts->{$key}->{copy} )
       {
          $final_props{$key} = $prev->{$key};
@@ -3648,6 +3648,7 @@ sub parse_event {
       $pos_in_log -= 1 if $pos_in_log;
 
       $raw_packet =~ s/\n20\Z//;
+      $raw_packet = "20$raw_packet" if $raw_packet =~ /\A20-\d\d-\d\d/; # workaround for year 2020 problem
       $raw_packet = "20$raw_packet" unless $raw_packet =~ m/\A20/;
 
       $raw_packet =~ s/0x0000:.+?(450.) /0x0000:  $1 /;
@@ -9938,6 +9939,8 @@ my $genlog_line_1= qr{
    \A
    (?:(\d{6}\s+\d{1,2}:\d\d:\d\d|\d{4}-\d{1,2}-\d{1,2}T\d\d:\d\d:\d\d\.\d+(?:Z|[-+]?\d\d:\d\d)?))? # Timestamp
    \s+
+   (?:\d{6}\s\d\d:\d\d:\d\d)? # Extra Time
+   \s+
    (?:\s*(\d+))                     # Thread ID
    \s
    (\w+)                            # Command
@@ -10674,7 +10677,13 @@ sub find_slave_hosts {
 
 sub _find_slaves_by_processlist {
    my ( $self, $dsn_parser, $dbh, $dsn ) = @_;
+   my @connected_slaves = $self->get_connected_slaves($dbh);
+   my @slaves = $self->_process_slaves_list($dsn_parser, $dsn, \@connected_slaves);
+   return @slaves;
+}
 
+sub _process_slaves_list {
+   my ($self, $dsn_parser, $dsn, $connected_slaves) = @_;
    my @slaves = map  {
       my $slave        = $dsn_parser->parse("h=$_", $dsn);
       $slave->{source} = 'processlist';
@@ -10682,12 +10691,15 @@ sub _find_slaves_by_processlist {
    }
    grep { $_ }
    map  {
-      my ( $host ) = $_->{host} =~ m/^([^:]+):/;
+      my ( $host ) = $_->{host} =~ m/^(.*):\d+$/;
       if ( $host eq 'localhost' ) {
          $host = '127.0.0.1'; # Replication never uses sockets.
       }
+      if ($host =~ m/::/) {
+          $host = '['.$host.']';
+      }
       $host;
-   } $self->get_connected_slaves($dbh);
+   } @$connected_slaves;
 
    return @slaves;
 }
@@ -10826,12 +10838,19 @@ sub get_slave_status {
               if (!$self->{channel}) {
                   die 'This server returned more than one row for SHOW SLAVE STATUS but "channel" was not specified on the command line';
               }
+              my $slave_use_channels;
               for my $row (@$sss_rows) {
                   $row = { map { lc($_) => $row->{$_} } keys %$row }; # lowercase the keys
+                  if ($row->{channel_name}) {
+                      $slave_use_channels = 1;
+                  }
                   if ($row->{channel_name} eq $self->{channel}) {
                       $ss = $row;
                       last;
                   }
+              }
+              if (!$ss && $slave_use_channels) {
+                 die 'This server is using replication channels but "channel" was not specified on the command line';
               }
           } else {
               if ($sss_rows->[0]->{channel_name} && $sss_rows->[0]->{channel_name} ne $self->{channel}) {
@@ -10844,6 +10863,9 @@ sub get_slave_status {
           if ( $ss && %$ss ) {
              $ss = { map { lc($_) => $ss->{$_} } keys %$ss }; # lowercase the keys
              return $ss;
+          }
+          if (!$ss && $self->{channel}) {
+              die "Specified channel name is invalid";
           }
       }
 
@@ -13095,6 +13117,7 @@ use List::Util   qw(max);
 use Scalar::Util qw(looks_like_number);
 use POSIX        qw(signal_h);
 use Data::Dumper;
+use Digest::MD5 qw(md5_hex);
 
 use Percona::Toolkit;
 
@@ -13132,13 +13155,41 @@ my $exit_status = 0;
 (my $tool = __PACKAGE__) =~ tr/_/-/;
 
 sub my_alternative {
-    my ( $str1 , $event) = @_;
+    my ($event) = @_;
+
+    if (! defined $event ){
+        return;
+    }
+
     my $str2=$event->{arg};
+    my $str1=$str2;
+
+    $str2 =~ m/\Aadministrator command: / 
+       && return;
+    $str2 =~ m/\/\* No query \*\// 
+       && return;
+
     my $diff=0;
     my $c=0;
     my $position=0;
     my $lenposition = length($str1);
     my $eventId=0;
+
+    $str1 =~ s/\\["']//g;                # quoted strings
+    $str1 =~ s/".*?"/?/sg;               # quoted strings
+    $str1 =~ s/'.*?'/?/sg;               # quoted strings
+
+    $str1 =~ s/\bfalse\b|\btrue\b/?/isg; # boolean values
+
+    $str1 =~ s/([._-])[a-f0-9]{32}/$1?/g;
+
+    $str1 =~ s/([a-z])([0-9]+)\./$1?\./g;
+    $str1 =~ s/([a-z])([0-9]+)\b/$1?/g;
+    $str1 =~ s/\b[0-9+-][0-9a-f.xb+-]*/?/g;
+
+    $str1 =~ s/\A\s+//;                  # Chop off leading whitespace
+    chomp $str1;                         # Kill trailing whitespace
+    #    $str1 =~ tr[ \n\t\r\f][ ]s;          # Collapse whitespace
 
     return 0 if ! rindex($str1,"administrator command:",0);
 
@@ -13147,90 +13198,98 @@ sub my_alternative {
 
     $str2 =~ s/\A\s+//;                  # Chop off leading whitespace
     chomp $str2;                         # Kill trailing whitespace
-    $str2 =~ tr[ \n\t\r\f][ ]s;          # Collapse whitespace
-    $str2 = lc $str2;
+    #    $str2 =~ tr[ \n\t\r\f][ ]s;          # Collapse whitespace
+    #    $str2 = lc $str2;
 
-    my @str1chars = split("", $str1);
-    if (!@str1chars){
-       return;
-    }
-
-    my @str2chars = split("", $str2);
-    my $len = length($str2);
-
+    # Saving Query Template
     my $checksum=make_checksum($str1);
     my $dir = "data/";
-
-    open(my $fhdata, '>>', $dir . $eventId . "_data");
+    mkdir $dir;
+    my $filename=$dir . $eventId . "_data";
+    open(my $fhdata, '>>', $filename);
     print $fhdata "\t{\"$checksum\" , \"";
-    my $goforward=0;
-    my $state=0;
-    my $first=1;
-    while ( $position < $lenposition ){
-       while ( $position + $goforward < $lenposition and defined($str2chars[$position + $goforward + $diff]) and  $str1chars[$position + $goforward] eq $str2chars[$position + $goforward + $diff] ){
-         $goforward=$goforward+1;
-       }
-       #       print "$str1chars[$position + $goforward] eq $str2chars[$position + $goforward + $diff] : not equal";
-       if ($position + $goforward < $lenposition){
-	       if ($str1chars[$position + $goforward] eq '?') {
-		       $state=1;
-		       $position=$position+$goforward;
-		       $goforward=0;
-		       if ($position +1 < $lenposition && $str1chars[$position+1] eq '+') {
-			       $position=$position+1;
-			       $diff=$diff-1;
-		       }
-		       if ($first == 1){
-			       $first=0;
-		       }else{
-			       if ($position < $lenposition ){
-				       print $fhdata "\t";
-			       }
-       		       }
-                       if ( defined($str2chars[$position+$diff])){
-			       my $tmpstr=$str2chars[$position+$diff] ;
-			       $tmpstr =~ s/"/\\"/g;
-			       print $fhdata "$tmpstr";
-		       }
-		       $position=$position+1;
-	       }else{ # We need to print the buffer if it is not larger than 5, because why so many equal characters?
-		       if ($goforward < 3) {
-			       for(my $i = 0; $i <= $goforward; $i++){
-				       if ( defined($str2chars[$position+$diff])){
-					       my $tmpstr=$str2chars[$position+$diff] ;
-					       $tmpstr =~ s/"/\\"/g;
-			       #			       print  "printing: $tmpstr \n";
-						if ($state == 1){
-			       				print $fhdata "$tmpstr";
-						}
-	 					$diff=$diff+1;
-	 				}else {$position=$position+1;}
-	 			}
-	 		}else{  $state=0;
-				$position=$position+$goforward;
-			}
- 			$goforward=0;
-	       }
-       }else{
-	       $position=$position+$goforward;
-       }
-    }
-    while ( $position+$diff < $len ){
-      my $tmpstr = $str2chars[$position+$diff];
-      $tmpstr =~ s/"/\\"/g;
-      print $fhdata "$tmpstr";
-      $diff=$diff+1;
-    }
-    print $fhdata "\"},\n";
-    close $fhdata;
 
-    if (! -f $dir . $checksum . "_query" ){
+    my $data="";
+    my $prepos=0;
+    my $nextpos=index($str1,"?");
+    my $from=0;
+    while ($nextpos > 0){
+	my $match=substr($str1,$prepos,$nextpos-$prepos);
+	my $pos2=index($str2,$match,$from);
+	if ( $pos2 > 0 ){
+		$data.=substr($str2,$from,$pos2-$from)."\t";
+	}else{
+		print("String not found. This should not happen, please fil a bug \n$str1 \n$str2 \n") unless $pos2 == 0;
+	}
+	$from=$nextpos-$prepos+$pos2;
+    	$prepos=$nextpos+1;
+	$prepos++ if (substr($str1,$prepos,1) eq "+");
+	$nextpos=index($str1,"?",$prepos);
+    }
+    my $finaldata=substr($str1,$prepos,length($str1)-$prepos);
+    if ( $finaldata eq "" ){
+	$data.=substr($str2,$from,length($str2)-$from);
+    }else{
+	$data.=substr($str2,$from,length($str2)-length($finaldata)-$from);
+    }
+
+
+    $dir="template/";
+    mkdir $dir;
+
+    $filename= $dir . $checksum . "_query";
+    if (! -f $filename ){
       $str1 =~ s/\?\+/%s/g;
       $str1 =~ s/\?/%s/g;
-      open(my $fhquery, '>', $dir . $checksum . "_query");
+      open(my $fhquery, '>', $filename);
       print $fhquery "$str1\n";
       close $fhquery;
     }
+
+    my $templdata="";
+    my $variables="";
+    my $offset=0;
+    while ($offset < length($data) ){
+        my $starting=$offset;
+        while ( substr($data,$offset,1) =~ /[0-9]|[a-z]/i) {
+            $offset++;
+        }
+        if ($offset > $starting){
+            	$variables.=substr($data,$starting,$offset-$starting);
+            	if ($offset < length($data)) { $variables.="\t";}
+                $templdata.="%s";
+		# Do we need to escape the char?
+                if (substr($data,$offset,1) eq "%"){
+                    $templdata.="%";
+                }
+                $templdata.=substr($data,$offset,1);
+                $offset++;
+	}else{
+		# Do we need to escape the char?
+		if (substr($data,$offset,1) eq "%"){
+		    $templdata.="%";
+		}
+                $templdata.=substr($data,$offset,1);
+                $offset++;
+            }
+        }
+    $checksum = uc md5_hex($templdata);
+    print $fhdata $checksum;
+    print $fhdata "\" , \"";
+    print $fhdata $variables;
+    print $fhdata "\"},\n";
+    close $fhdata;
+
+    # Saves the template of the data
+    $filename=$dir.$checksum."_data";
+    unless (-e $filename){
+
+        open(my $data_template, '>', $filename) or die $!;
+	$templdata =~ s/\\/\\\\/g;
+        print $data_template $templdata;
+        close($data_template);
+    }
+
     return -1;
 }
 
@@ -14025,11 +14084,8 @@ sub main {
                $report = 1;
             }
 
-	    my $fingerprint=$qr->fingerprint($args->{event}->{arg});
-	    if (defined $fingerprint){
-		    #		    print ($args->{event}->{Id}) if exists $args->{event}->{Id};
-		    my_alternative($fingerprint, $args->{event}); #DAVID
-	    }
+	    my_alternative($args->{event}); #DAVID
+
             if ( $report ) {
                PTDEBUG && _d("Iteration", $args->{iter}, "stopped at",ts(time));
 
@@ -17031,6 +17087,6 @@ Place, Suite 330, Boston, MA  02111-1307  USA.
 
 =head1 VERSION
 
-pt-query-digest 3.0.13
+pt-query-digest 3.2.0
 
 =cut
