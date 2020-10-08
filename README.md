@@ -1,5 +1,5 @@
 # ptqd2lua
-With pt-query-digest, we can parse the queries to get a file with the queries executed and the data
+pt-query-digest is able to parse Slow Log, General Log, Binlog, TCPDump and Rawlog, the version in this repository adds a hook to split the query template, the data template and the data and saves it in different files. Then other scripts process this files to identify the sessions that are executing the same queries and groups them. Then process the data to identify which is the best function per data needed in each template. Finally, merge everything in files that a LUA script is able to process, so sysbench can send it to the database.
 
 # Sysbench version
 
