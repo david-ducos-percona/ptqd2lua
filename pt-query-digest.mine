@@ -13154,6 +13154,8 @@ my $exit_status = 0;
 
 (my $tool = __PACKAGE__) =~ tr/_/-/;
 
+my $sessionlist={};
+
 sub my_alternative {
     my ($event) = @_;
 
@@ -13202,11 +13204,23 @@ sub my_alternative {
     #    $str2 = lc $str2;
 
     # Saving Query Template
-    my $checksum=make_checksum($str1);
+    my $checksum;
     my $dir = "data/";
     mkdir $dir;
     my $filename=$dir . $eventId . "_data";
+    $dir="template/";
+    mkdir $dir;
     open(my $fhdata, '>>', $filename);
+    if (defined $event->{Schema} && ( ! defined $sessionlist->{$eventId} || $sessionlist->{$eventId} ne $event->{Schema} )){
+        $sessionlist->{$eventId}=$event->{Schema};
+	my $usedata="USE $sessionlist->{$eventId}\n";
+	$checksum=uc md5_hex($usedata);
+        open(my $fhuse, '>', $dir . $checksum . "_query");
+        print $fhuse "$usedata";
+        close $fhuse;
+	print $fhdata "\t{\"$checksum\" , \"D41D8CD98F00B204E9800998ECF8427E\" , \"\"},\n";
+    }
+    $checksum=make_checksum($str1);
     print $fhdata "\t{\"$checksum\" , \"";
 
     my $data="";
@@ -13232,10 +13246,6 @@ sub my_alternative {
     }else{
 	$data.=substr($str2,$from,length($str2)-length($finaldata)-$from);
     }
-
-
-    $dir="template/";
-    mkdir $dir;
 
     $filename= $dir . $checksum . "_query";
     if (! -f $filename ){
