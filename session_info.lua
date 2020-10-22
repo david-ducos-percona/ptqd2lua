@@ -14,8 +14,8 @@ function load_file(filename)
 end
 
 
-function load_session_execution(session_id)
-	my_data = load_file("code/" .. session_id .. "_session")
+function load_session_execution(session_id,pos)
+	my_data = load_file("code/" .. session_id .. "_session_" .. string.format("%02d",pos))
 --        print("Loading Session Execution: ".. session_id:sub(2) .."Random: ".. sysbench.rand.hexadecimal(32, 32))
 	return my_data.executions;	
 end
@@ -57,34 +57,35 @@ function split(s, delimiter)
     return result;
 end
 
-function search_next_session(thread_number)
-	session=load_session_execution(i)
-	data=load_session_data(i)
-end
-
 function execute_session(sid)
 	data_per_thread=load_session_data(sid)
-	session=load_session_execution(sid)
-	current_pos=1
-	while  current_pos < #session 
+	current_file_pos=0
+	session=load_session_execution(sid,current_file_pos)
+	while session~=nil
 		do
-		pack=session[current_pos]
-		md5="u"..pack[1]
-		querytemplate=load_template_query(pack[1])
-		datatemplate=load_template_data(pack[2])
-		data=pack[3]
-		elem=split(data,'\t')
-		newdata=""
-		for i,e in pairs(elem) do
-			if not(e=="")
-			then
-				newdata=newdata .. data_per_thread[e:sub(5)] .. "\t"
+		current_pos=1
+		while  current_pos <= #session 
+			do
+			pack=session[current_pos]
+			md5="u"..pack[1]
+			querytemplate=load_template_query(pack[1])
+			datatemplate=load_template_data(pack[2])
+			data=pack[3]
+			elem=split(data,'\t')
+			newdata=""
+			for i,e in pairs(elem) do
+				if not(e=="")
+				then
+					newdata=newdata .. data_per_thread[e:sub(5)] .. "\t"
+				end
 			end
+			data=string.format(datatemplate,unpack(split(newdata:sub(1, #newdata - 1),'\t')))
+			query_ready_to_execute=string.format(querytemplate,unpack(split(data,'\t')))
+			print (pack[1].." "..pack[2]..":"..query_ready_to_execute)
+			current_pos=current_pos+1
 		end
-		data=string.format(datatemplate,unpack(split(newdata:sub(1, #newdata - 1),'\t')))
-		query_ready_to_execute=string.format(querytemplate,unpack(split(data,'\t')))
-		print (pack[1].." "..pack[2]..":"..query_ready_to_execute)
-		current_pos=current_pos+1
+		current_file_pos=current_file_pos+1
+		session=load_session_execution(sid,current_file_pos)
 	end
 end
 
@@ -96,5 +97,6 @@ end
 
 function event()
         s = io.read()
-        execute_session(s)
+	current_file_pos=0
+	execute_session(s)
 end

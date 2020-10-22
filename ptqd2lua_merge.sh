@@ -17,15 +17,30 @@ do
 	session_data="code/${session_md5}_data"
 
 	${compactfunctions} ${session_dir}  > ${session_data}
-	echo "return { executions = { $(cat $session_dir) } }" > ${session_execution}
+	split -d -l 65534  $session_dir ${session_execution}_
+	echo "${session_execution}" >> log
+	for ses in $(find -name "$(basename ${session_execution})_*")
+	do
+		echo "$ses   " >> log
+		sed -i '1s/^/return { executions = { /' $ses
+		echo "}}" >> $ses
+	done
+#	echo "return { executions = { $(cat $session_dir) } }" > ${session_execution}
 done
 }
 
 mkdir -p code
 
 total=$(find template -name "*_session" | wc -l);
-split=$(( $total / $threads + 1));
-wait=$(for i in $(seq 0 $(( $threads - 1))) ;
+if (( $threads > $total ))
+then
+        ct=$total
+        split=1
+else
+        ct=$threads
+        split=$(( $total / $ct + 1));
+fi
+wait=$(for i in $(seq 0 $(( $ct - 1))) ;
 do
         merge $(find template -name "*_session" | head -$(( $total - $split * $i )) | tail -$split) &
         echo $?
@@ -44,8 +59,8 @@ echo "querytemplate   = { $(find template -name "*_query"     | sort | while rea
 
 echo "datatemplate    = { $(find template -name "*_data"  | sort | while read filename ; do echo "u$(basename $filename _data) = \"$(cat $filename | sed ':a;N;$!ba;s/\n/ /g;s/\r//g' | sed 's/"/\\"/g')\"," ; done ) }" >> $outputfile
 
-echo "sessiontemplate = { $(find code -name "*_session" | while read filename ; do
-	session_md5=$(basename $filename _session)
+echo "sessiontemplate = { $(find code -name "*_data" | while read filename ; do
+	session_md5=$(basename $filename _data)
 	for i in $( seq 1 $(ls data/$(echo $session_md5 | sed 's/_/\//g')/*_data | wc -l))
 	do
 		echo "u${session_md5}= $i," ;

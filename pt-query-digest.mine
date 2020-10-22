@@ -13162,7 +13162,8 @@ sub my_alternative {
     if (! defined $event ){
         return;
     }
-
+    return 1 if (defined  $event->{Last_errno} && $event->{Last_errno} ne '0');
+    #print(Dumper($event));
     my $str2=$event->{arg};
     my $str1=$str2;
 
@@ -13259,14 +13260,17 @@ sub my_alternative {
     my $templdata="";
     my $variables="";
     my $offset=0;
+    my @data_array;
     while ($offset < length($data) ){
         my $starting=$offset;
         while ( substr($data,$offset,1) =~ /[0-9]|[a-z]/i) {
             $offset++;
         }
         if ($offset > $starting){
-            	$variables.=substr($data,$starting,$offset-$starting);
-            	if ($offset < length($data)) { $variables.="\t";}
+		my $current_data=substr($data,$starting,$offset-$starting);
+            	if ($variables ne "") {$variables.="\t";}
+		push(@data_array,$current_data);
+		$variables.=$current_data;
                 $templdata.="%s";
 		# Do we need to escape the char?
                 if (substr($data,$offset,1) eq "%"){
@@ -13283,13 +13287,22 @@ sub my_alternative {
                 $offset++;
             }
         }
+    my $datapos_filename="data/".$checksum."_";
     $checksum = uc md5_hex($templdata);
+    $datapos_filename.=$checksum."_";
     print $fhdata $checksum;
     print $fhdata "\" , \"";
     print $fhdata $variables;
     print $fhdata "\"},\n";
     close $fhdata;
+    my $pos=1;
 
+    foreach my $value ( @{data_array} ) {
+	    open(my $data_pos, '>>', $datapos_filename . $pos) or die $!;
+	    print $data_pos "$value"."\n";
+	    close($data_pos); 
+	    $pos++;
+    }
     # Saves the template of the data
     $filename=$dir.$checksum."_data";
     unless (-e $filename){

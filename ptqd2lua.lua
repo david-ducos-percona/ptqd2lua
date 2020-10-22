@@ -15,8 +15,8 @@ function load_file(filename)
 end
 
 
-function load_session_execution(session_id)
-	filename="code/" .. session_id:sub(2) .. "_session"
+function load_session_execution(session_id,pos)
+	filename="code/" .. session_id:sub(2) .. "_session_" .. string.format("%02d",pos)
 	my_data = load_file(filename)
 --      print("Loading Session Execution: ".. filename)
 	return my_data.executions;	
@@ -40,6 +40,7 @@ function thread_init()
   sessions_per_thread={}
   current_sid={}
   current_pos={}
+  current_file_pos={}
   current_pack={}
   removed_sid={}
   data_per_thread={}
@@ -47,6 +48,7 @@ function thread_init()
   for thread_number=0, sysbench.opt.threads-1 do
         sessions_per_thread[thread_number]={}
         current_pos[thread_number]=1
+	current_file_pos[thread_number]=0;
   end
   -- Loading the session ids into the sessions per thread
   i=0
@@ -58,7 +60,7 @@ function thread_init()
   for thread_number=0, sysbench.opt.threads - 1 do
         current_sid[thread_number]=table.remove(sessions_per_thread[thread_number]);
 	removed_sid[thread_number]={}
-	current_pack[thread_number]    = load_session_execution(current_sid[thread_number])
+	current_pack[thread_number]    = load_session_execution(current_sid[thread_number],current_file_pos[thread_number])
         data_per_thread[thread_number] = load_session_data     (current_sid[thread_number])
   end
 end
@@ -81,7 +83,8 @@ end
 function search_next_session(thread_number)
 --	print("Searching new session\n")
 	i=table.remove(sessions_per_thread[thread_number])
-	current_pack[thread_number] = load_session_execution(i)
+	current_file_pos[thread_number]=0;
+	current_pack[thread_number] = load_session_execution(i,current_file_pos[thread_number])
 	data_per_thread[sysbench.tid]=load_session_data(i)
 	table.insert(removed_sid[thread_number],i)
 	if (#sessions_per_thread[thread_number] == 0)
@@ -95,6 +98,18 @@ function search_next_session(thread_number)
 	return i
 end
 
+
+function search_next_piece_of_same_session(thread_number)
+	current_file_pos[thread_number]=current_file_pos[thread_number]+1;
+	newdata=load_session_execution(current_sid[thread_number],current_file_pos[thread_number])
+	if newdata ~=nil
+	then
+		current_pack[thread_number] = newdata
+		return 1
+	end
+	return 0
+end
+
 function next_pos(thread_number)
 	if not(current_sid[thread_number] == 0 )
 	then
@@ -102,9 +117,12 @@ function next_pos(thread_number)
 	        then
 			current_pos[thread_number]=current_pos[thread_number]+1
 		else
-			current_sid[thread_number]=search_next_session(thread_number)
+			if (search_next_piece_of_same_session(thread_number) == 0)
+				then
+				current_sid[thread_number]=search_next_session(thread_number)
+--				print ("Starting new session id:",current_sid[thread_number])
+			end
 			current_pos[thread_number]=1
---			print ("Starting new session id:",current_sid[thread_number])
 	        end
 	end
         return 0;
@@ -118,8 +136,9 @@ function execute_session(sid)
 		data=pack[3]
 		elem=split(data,'\t')
 		newdata=""
---		print(pack[1] .. " " .. pack[2].."\n")
+		-- print(sid .. " " .. pack[1] .. " " .. pack[2].."\n")
 		for i,e in pairs(elem) do
+			-- print(e:sub(5))
 			if not(e=="")
 			then
 				newdata=newdata .. data_per_thread[sysbench.tid][e:sub(5)] .. "\t"

@@ -17,7 +17,6 @@ echo "Starting pt-query-digest"
 $ptquerydigest --no-report $1 
 threads=8
 dirname="ptqd2lua.$(date "+%Y%m%d%H%M%S")"
-
 if [ ! -d "data" ] || [ ! -d "template" ]
 then
 	echo "Error: data or template path doesn't exist."
@@ -41,15 +40,46 @@ function data_split_by_session_id() {
 	done
 }
 
-echo "Processing $(ls data/*_data | wc -l ) sessions files"
 total=$(ls data/*_data | wc -l);
-split=$(( $total / $threads + 1));
-wait=$(for i in $(seq 0 $(( $threads - 1))) ;
+echo "Processing $total sessions files"
+
+if (( $threads > $total ))
+then
+	ct=$total
+        split=1
+else
+        ct=$threads
+        split=$(( $total / $ct + 1));
+fi
+wait=$(for i in $(seq 0 $(( $ct - 1))) ;
+
 do
 	data_split_by_session_id $(ls data/*_data | head -$(( $total - $split * $i )) | tail -$split) &
 done )
 
 echo "Reduced to $(find data -mindepth 1 -maxdepth 1 -type d | wc -l)."
+
+
+# Creates all the generated files
+
+echo "Starting to create the function that creates the ramdom data"
+
+# iterate per session_md5
+mkdir generate
+total=$(find data -mindepth 1 -maxdepth 1 -type f | wc -l);
+
+if (( $threads > $total ))
+then
+	ct=$total
+	split=1
+else
+        ct=$threads
+	split=$(( $total / $ct + 1));
+fi
+wait=$(for i in $(seq 0 $(( $ct - 1))) ;
+do
+        ${generatefunctions} $(find data -mindepth 1 -maxdepth 1 -type f | head -$(( $total - $split * $i )) | tail -$split) &
+done )
 
 # Moves the files from data/<session template md5>/*_data to data/<session template md5>/<data template md5>/
 # Creates the '_value' files in data/<session template md5>/<data template md5>/
@@ -64,19 +94,19 @@ function parallel_process() {
 			template_md5=$(md5sum ${file}_template | cut -f1 -d' ')
 			data_dir=${session_dir}/${template_md5}
 			mkdir -p $data_dir
-			for f in $( ls ${session_dir}/*_value )
-			do
-				cat $f >> ${data_dir}/$(basename $f)
-				rm $f
-			done
+#			for f in $( find ${session_dir} -mindepth 1 -maxdepth 1  -name "*_value" )
+#			do
+#				cat $f >> ${data_dir}/$(basename $f)
+#				rm $f
+#			done
 			mv ${file}_template $file ${session_dir}/${template_md5}/
 		done
 	        session_md5=$(basename $session_dir)
 		wait=$(find $session_dir -mindepth 1 -maxdepth 1 -type d | while read template_dir; do
-			template_md5=$(basename $template_dir)
-                	cat       $(ls ${template_dir}/*_template | head -1) > template/${session_md5}_${template_md5}_session
-			${generatefunctions} $(ls ${template_dir}/*_value )  &
-		done)
+				template_md5=$(basename $template_dir)
+                		cat       $(ls ${template_dir}/*_template | head -1) > template/${session_md5}_${template_md5}_session
+#				${generatefunctions} $(ls ${template_dir}/*_value )  &
+			done)
 	done
 }
 
@@ -84,8 +114,15 @@ echo "Starting to create session template and value"
 
 # iterate per session_md5
 total=$(find data -mindepth 1 -maxdepth 1 -type d | wc -l);
-split=$(( $total / $threads + 1));
-wait=$(for i in $(seq 0 $(( $threads - 1))) ;
+if (( $threads > $total ))
+then
+        ct=$total
+        split=1
+else
+        ct=$threads
+        split=$(( $total / $ct + 1));
+fi
+wait=$(for i in $(seq 0 $(( $ct - 1))) ;
 do
         parallel_process $(find data -mindepth 1 -maxdepth 1 -type d | head -$(( $total - $split * $i )) | tail -$split) &
 done )
