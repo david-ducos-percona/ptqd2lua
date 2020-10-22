@@ -30,7 +30,8 @@ we are not going to need to use this sysbench version
 ```
 ptqd2lua_expand.sh ps571-slow.log
 ```
-And then follow the instructions
+And then follow the instructions.
+Finally, you can configure and run sysbench.sh
 
 
 # Troubleshooting errors
