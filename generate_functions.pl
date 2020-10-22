@@ -64,7 +64,7 @@ foreach (@ARGV){
 	}else{ if ( $before eq "%d" ) {
 		seek $info, 0, 0;
 		my $sumsq=0;
-		my $media=$sum / $count;
+		my $media=int($sum / $count);
 		my @stest;
 		while (my $line =<$info>){ 
 			$str=substr($line,0,length($line)-1);
@@ -79,13 +79,14 @@ foreach (@ARGV){
 		#my $var=sqrt($sumsqr / $count);
 		if ($pval > 0.05 ){
 			my $diff=($maxval - $minval) /2;
-			my $min=$media - $diff;
-			my $max=$media + $diff;
+			my $min=int($media - $diff);
+			$min=0 if ($minval >= 0 && $min < 0 );
+			my $max=int($media + $diff);
 			print $newfile "sysbench.rand.gaussian( ". $min  .",". $max .") ;\n";
-			$before="%g $media $min $max";
+			$before="%g$media $min $max";
 		}else{
 		        print $newfile "sysbench.rand.".$distribution."(".$minval.",".$maxval .");\n";
-			$before="%n$maxlen $minval $maxval";
+			$before="%n$maxlen"."_$maxval $minval $maxval";
 		}
         }else{ if ( $before eq "%b" ) {
                 print $newfile "ar[sysbench.rand.uniform(1,2)];\n";

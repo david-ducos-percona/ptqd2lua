@@ -90,7 +90,7 @@ function search_next_session(thread_number)
 	if (#sessions_per_thread[thread_number] == 0)
 	then
 --		Restarting the sessions that needs to be executed by this thread
---		This is to get the neverends workload feeling
+--		This is to get the endless workload feeling
 		sessions_per_thread[thread_number]=removed_sid[thread_number];
 		removed_sid[thread_number]={}
 --		print("Reinitializing Thread: " .. thread_number);
@@ -147,8 +147,19 @@ function execute_session(sid)
 		data=string.format(datatemplate["u"..pack[2]],unpack(split(newdata:sub(1, #newdata - 1),'\t')))
 		query_ready_to_execute=string.format(querytemplate[md5],unpack(split(data,'\t')))
 		next_pos(sysbench.tid)
-		-- Next line should be UNCOMMENTED           
-		con:query(query_ready_to_execute)
+		-- Next line should be UNCOMMENTED          
+		if not(  pcall(function () con:query(query_ready_to_execute); end))
+		then
+			print("\nFailed: data/"..pack[1] .. "_"..pack[2] .."*");
+			print("Failed: generate/"..pack[1] .. "_"..pack[2].."*");
+                        print("Failed: template/"..pack[1] .. "_query");
+			print("Failed: template/"..pack[2] .. "_data");
+			print("Failed: echo ".. sid:sub(2) .." | session_info.sh ");
+			print("Failed: code/".. sid:sub(2) .."_session_"..  current_file_pos[sysbench.tid] ..":" ..current_pos[sysbench.tid]-1);
+			for i,e in pairs(elem) do
+				print(e..": "..data_per_thread[sysbench.tid][e:sub(5)])
+			end
+		end
 --		print (query_ready_to_execute)
 	else
 		next_pos(sysbench.tid)
